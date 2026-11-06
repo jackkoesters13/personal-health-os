@@ -100,12 +100,17 @@ def check_entry_exists(file_path, check_date):
     return False
 
 def call_gemini_with_fallback(client, contents, system_instruction):
-    """Tries active Gemini models and handles 404/NOT_FOUND and 503/UNAVAILABLE gracefully."""
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    """Tries modern Gemini endpoints and handles 404/NOT_FOUND and 503/UNAVAILABLE gracefully."""
+    models_to_try = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+    ]
     last_exception = None
 
     for model_name in models_to_try:
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -118,12 +123,12 @@ def call_gemini_with_fallback(client, contents, system_instruction):
                 return response
             except Exception as e:
                 last_exception = e
-                err_str = str(e)
-                # Catch 404 / NOT_FOUND or deprecation errors and jump to next model
-                if "404" in err_str or "NOT_FOUND" in err_str or "no longer available" in err_str:
+                err_str = str(e).lower()
+                # If model is 404 / not found / deprecated for key, try next model immediately
+                if "404" in err_str or "not_found" in err_str or "no longer available" in err_str or "not found" in err_str:
                     break
-                # Catch 503 / UNAVAILABLE spikes and retry with exponential wait
-                elif "503" in err_str or "UNAVAILABLE" in err_str or "high demand" in err_str:
+                # If 503 / high demand / rate limit, wait and retry current model
+                elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str or "429" in err_str or "quota" in err_str:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 else:
