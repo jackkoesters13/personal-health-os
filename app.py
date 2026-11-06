@@ -691,63 +691,105 @@ Provide a crisp, actionable analysis covering:
                             st.error(f"Error running AI Analysis: {e}")
 
 # ==========================================
-# PAGE 6: DATA MANAGER & INLINE EDITOR
+# PAGE 6: DATA MANAGER & INLINE EDITOR WITH DELETION
 # ==========================================
 elif st.session_state["active_tab"] == "📁 Data Manager":
     st.header("📁 Historical Data Manager")
-    st.caption("Double-click any cell to edit past data directly, then tap Save Changes.")
+    st.caption("Double-click cells to edit. Select the row checkbox and tap the trash 🗑️ icon to delete days, then tap Save Changes.")
 
     tab_m, tab_e, tab_s = st.tabs(["☀️ Morning Logs", "🌙 Evening Logs", "🛌 Sleep Logs"])
 
+    # --- TAB 1: MORNING LOGS ---
     with tab_m:
         df_m = load_data(MORNING_LOG)
         if not df_m.empty:
+            original_dates_m = set(df_m["date"].astype(str))
             edited_df_m = st.data_editor(df_m, num_rows="dynamic", use_container_width=True, key="edit_m")
+            
             if st.button("💾 Save Morning Changes", type="primary"):
                 save_data(edited_df_m, MORNING_LOG)
                 if supabase:
                     try:
-                        records = edited_df_m.to_dict(orient="records")
-                        for r in records:
-                            r["date"] = str(r["date"])
-                        supabase.table("morning_logs").upsert(records, on_conflict="date").execute()
-                        st.success("Morning logs updated successfully!")
+                        edited_dates_m = set(edited_df_m["date"].astype(str)) if not edited_df_m.empty else set()
+                        deleted_dates_m = list(original_dates_m - edited_dates_m)
+                        
+                        # Delete missing dates from Supabase
+                        if deleted_dates_m:
+                            supabase.table("morning_logs").delete().in_("date", deleted_dates_m).execute()
+                            
+                        # Upsert remaining/updated records
+                        if not edited_df_m.empty:
+                            records = edited_df_m.to_dict(orient="records")
+                            for r in records:
+                                r["date"] = str(r["date"])
+                            supabase.table("morning_logs").upsert(records, on_conflict="date").execute()
+                            
+                        st.success("Morning logs updated and deletions applied!")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Sync error: {e}")
         else:
             st.info("No morning logs found.")
 
+    # --- TAB 2: EVENING LOGS ---
     with tab_e:
         df_e = load_data(EVENING_LOG)
         if not df_e.empty:
+            original_dates_e = set(df_e["date"].astype(str))
             edited_df_e = st.data_editor(df_e, num_rows="dynamic", use_container_width=True, key="edit_e")
+            
             if st.button("💾 Save Evening Changes", type="primary"):
                 save_data(edited_df_e, EVENING_LOG)
                 if supabase:
                     try:
-                        records = edited_df_e.to_dict(orient="records")
-                        for r in records:
-                            r["date"] = str(r["date"])
-                        supabase.table("evening_logs").upsert(records, on_conflict="date").execute()
-                        st.success("Evening logs updated successfully!")
+                        edited_dates_e = set(edited_df_e["date"].astype(str)) if not edited_df_e.empty else set()
+                        deleted_dates_e = list(original_dates_e - edited_dates_e)
+                        
+                        # Delete missing dates from Supabase
+                        if deleted_dates_e:
+                            supabase.table("evening_logs").delete().in_("date", deleted_dates_e).execute()
+                            
+                        # Upsert remaining/updated records
+                        if not edited_df_e.empty:
+                            records = edited_df_e.to_dict(orient="records")
+                            for r in records:
+                                r["date"] = str(r["date"])
+                            supabase.table("evening_logs").upsert(records, on_conflict="date").execute()
+                            
+                        st.success("Evening logs updated and deletions applied!")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Sync error: {e}")
         else:
             st.info("No evening logs found.")
 
+    # --- TAB 3: SLEEP LOGS ---
     with tab_s:
         df_s = load_data(SLEEP_LOG)
         if not df_s.empty:
+            original_dates_s = set(df_s["date"].astype(str))
             edited_df_s = st.data_editor(df_s, num_rows="dynamic", use_container_width=True, key="edit_s")
+            
             if st.button("💾 Save Sleep Changes", type="primary"):
                 save_data(edited_df_s, SLEEP_LOG)
                 if supabase:
                     try:
-                        records = edited_df_s.to_dict(orient="records")
-                        for r in records:
-                            r["date"] = str(r["date"])
-                        supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
-                        st.success("Sleep logs updated successfully!")
+                        edited_dates_s = set(edited_df_s["date"].astype(str)) if not edited_df_s.empty else set()
+                        deleted_dates_s = list(original_dates_s - edited_dates_s)
+                        
+                        # Delete missing dates from Supabase
+                        if deleted_dates_s:
+                            supabase.table("sleep_logs").delete().in_("date", deleted_dates_s).execute()
+                            
+                        # Upsert remaining/updated records
+                        if not edited_df_s.empty:
+                            records = edited_df_s.to_dict(orient="records")
+                            for r in records:
+                                r["date"] = str(r["date"])
+                            supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
+                            
+                        st.success("Sleep logs updated and deletions applied!")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Sync error: {e}")
         else:
