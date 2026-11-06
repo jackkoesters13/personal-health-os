@@ -36,7 +36,6 @@ SLEEP_LOG = "sleep_logs.csv"
 # --- HELPER FUNCTIONS ---
 def load_data(file_path):
     table_name = file_path.replace(".csv", "")
-    # Try loading from Supabase Cloud first
     if supabase:
         try:
             res = supabase.table(table_name).select("*").execute()
@@ -48,7 +47,6 @@ def load_data(file_path):
         except Exception:
             pass
             
-    # Fallback to local CSV if offline/local
     if os.path.exists(file_path):
         try:
             df = pd.read_csv(file_path)
@@ -87,7 +85,7 @@ if "num_workouts" not in st.session_state:
 st.title("🛡️ My Personal Health OS")
 
 # ==========================================
-# MOBILE STACKED NAVIGATION BOXES (2 ROWS OF 3)
+# MOBILE STACKED NAVIGATION BOXES
 # ==========================================
 st.markdown("### 📱 Navigation")
 
@@ -128,7 +126,7 @@ with nav_row2_col3:
 st.divider()
 
 # ==========================================
-# PAGE 1: MORNING LOG (PVT WITH LAPSES & FALSE STARTS)
+# PAGE 1: MORNING LOG
 # ==========================================
 if st.session_state["active_tab"] == "☀️ Morning":
     st.header("Morning Check-In")
@@ -256,9 +254,9 @@ if st.session_state["active_tab"] == "☀️ Morning":
 
         with st.form("morning_form"):
             log_date = st.date_input("Date", today_date)
-            pvt_reaction_time = st.number_input("PVT Median Reaction Time (ms)", min_value=100, max_value=1500, value=250, help="Paste your PVT median score here")
-            pvt_lapses = st.number_input("PVT Lapses (>500ms)", min_value=0, value=0, step=1, help="Number of responses slower than 500ms")
-            pvt_false_starts = st.number_input("PVT False Starts", min_value=0, value=0, step=1, help="Number of early taps before green")
+            pvt_reaction_time = st.number_input("PVT Median Reaction Time (ms)", min_value=100, max_value=1500, value=250)
+            pvt_lapses = st.number_input("PVT Lapses (>500ms)", min_value=0, value=0, step=1)
+            pvt_false_starts = st.number_input("PVT False Starts", min_value=0, value=0, step=1)
             
             st.markdown("#### Physical & Mental Readiness")
             soreness = st.slider("Body Soreness (1-10)", 1, 10, 1)
@@ -281,7 +279,6 @@ if st.session_state["active_tab"] == "☀️ Morning":
                 df_m = pd.concat([df_m, pd.DataFrame([new_entry])], ignore_index=True)
                 save_data(df_m, MORNING_LOG)
 
-                # --- SYNC TO SUPABASE CLOUD ---
                 if supabase:
                     try:
                         entry_db = new_entry.copy()
@@ -295,7 +292,7 @@ if st.session_state["active_tab"] == "☀️ Morning":
                 st.rerun()
 
 # ==========================================
-# PAGE 2: EVENING LOG (DYNAMIC WORKOUT MENU)
+# PAGE 2: EVENING LOG
 # ==========================================
 elif st.session_state["active_tab"] == "🌙 Evening":
     st.header("Evening Check-In")
@@ -320,7 +317,6 @@ elif st.session_state["active_tab"] == "🌙 Evening":
         st.subheader("🏋️ Workout Menu")
         
         workouts_data = []
-        
         for i in range(st.session_state["num_workouts"]):
             st.markdown(f"#### Workout {i+1}")
             w_type = st.selectbox(
@@ -416,7 +412,7 @@ elif st.session_state["active_tab"] == "🌙 Evening":
             st.rerun()
 
 # ==========================================
-# PAGE 3: SLEEP FILE PARSER & SAVER
+# PAGE 3: SLEEP FILE PARSER & SAVER (FULL DATA CAPTURE)
 # ==========================================
 elif st.session_state["active_tab"] == "📥 Sleep Import":
     st.header("📥 Import External Sleep Data")
@@ -427,37 +423,63 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
     if uploaded_file is not None:
         try:
             sleep_df = pd.read_csv(uploaded_file, sep=None, engine='python')
-            st.subheader("Data Preview")
+            st.subheader("Data Preview (All Exported Columns Captured)")
             st.dataframe(sleep_df.head(), use_container_width=True)
 
-            if "Start" in sleep_df.columns and "End" in sleep_df.columns:
-                sleep_df["Start"] = pd.to_datetime(sleep_df["Start"])
+            # Detect Date Column
+            date_col = None
+            if "End" in sleep_df.columns:
                 sleep_df["End"] = pd.to_datetime(sleep_df["End"])
                 sleep_df["date"] = sleep_df["End"].dt.date
-                
+                date_col = "date"
+            elif "date" in sleep_df.columns:
+                sleep_df["date"] = pd.to_datetime(sleep_df["date"]).dt.date
+                date_col = "date"
+
+            if date_col:
+                # Calculate sleep duration
                 if "Time in bed (seconds)" in sleep_df.columns:
                     sleep_df["sleep_hours"] = (sleep_df["Time in bed (seconds)"] / 3600).round(2)
-                else:
+                elif "Start" in sleep_df.columns and "End" in sleep_df.columns:
+                    sleep_df["Start"] = pd.to_datetime(sleep_df["Start"])
                     sleep_df["sleep_hours"] = ((sleep_df["End"] - sleep_df["Start"]).dt.total_seconds() / 3600).round(2)
+                elif "sleep_hours" not in sleep_df.columns:
+                    sleep_df["sleep_hours"] = 0.0
 
+                # Calculate sleep quality
                 if "Sleep quality" in sleep_df.columns:
                     sleep_df["sleep_quality"] = (
                         sleep_df["Sleep quality"].astype(str).str.rstrip("%").astype(float) / 10
                     ).round(1)
+                elif "sleep_quality" not in sleep_df.columns:
+                    sleep_df["sleep_quality"] = 0.0
 
-                st.success("Sleep Cycle format detected and successfully parsed!")
+                # Summarize ALL remaining raw CSV columns into a readable sleep_details string
+                exclude_cols = ["date", "sleep_hours", "sleep_quality"]
+                extra_cols = [c for c in sleep_df.columns if c not in exclude_cols]
+                
+                details_list = []
+                for _, row in sleep_df.iterrows():
+                    row_details = []
+                    for col in extra_cols:
+                        val = row[col]
+                        if pd.notna(val) and str(val).strip() != "":
+                            row_details.append(f"{col}: {val}")
+                    details_list.append(" | ".join(row_details))
+                
+                sleep_df["sleep_details"] = details_list
+
+                st.success("Full sleep dataset successfully parsed!")
 
                 latest_row = sleep_df.iloc[-1]
                 st.metric("Latest Sleep Duration", f"{latest_row['sleep_hours']} hrs")
                 if "sleep_quality" in sleep_df.columns:
                     st.metric("Latest Sleep Quality Score", f"{latest_row['sleep_quality']}/10")
                 
-                if st.button("💾 Save Extracted Sleep Data to Logs", type="primary", use_container_width=True):
-                    cols_to_save = ["date", "sleep_hours"]
-                    if "sleep_quality" in sleep_df.columns:
-                        cols_to_save.append("sleep_quality")
+                if st.button("💾 Save All Sleep Data to Logs", type="primary", use_container_width=True):
+                    cols_to_save = ["date", "sleep_hours", "sleep_quality", "sleep_details"]
+                    df_to_save = sleep_df[[c for c in cols_to_save if c in sleep_df.columns]].copy()
                     
-                    df_to_save = sleep_df[cols_to_save].copy()
                     df_existing = load_data(SLEEP_LOG)
                     if not df_existing.empty:
                         df_existing["date"] = pd.to_datetime(df_existing["date"]).dt.date
@@ -466,6 +488,7 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                         combined = df_to_save
                         
                     save_data(combined, SLEEP_LOG)
+                    
                     if supabase:
                         try:
                             records = combined.to_dict(orient="records")
@@ -474,10 +497,11 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                             supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
                         except Exception as e:
                             st.warning(f"Cloud sync note: {e}")
-                    st.success(f"Successfully saved {len(df_to_save)} sleep records!")
+                            
+                    st.success(f"Successfully saved {len(df_to_save)} detailed sleep records!")
 
             else:
-                st.warning("Custom CSV uploaded. Standard sleep fields could not be auto-mapped.")
+                st.warning("CSV uploaded, but could not detect a valid 'End' or 'date' timestamp column.")
 
         except Exception as e:
             st.error(f"Error reading file: {e}")
@@ -617,11 +641,11 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: AI HEALTH ANALYST
+# PAGE 5: AI HEALTH ANALYST (EXAMINES ALL SLEEP METRICS)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
     st.header("🧠 AI Health & Performance Trend Analyst")
-    st.write("Scan your accumulated health logs for cross-variable trends, cognitive impact patterns, and recovery correlations.")
+    st.write("Scan your accumulated health logs for cross-variable trends, cognitive impact patterns, detailed sleep metrics, and recovery correlations.")
 
     openai_key = st.secrets.get("OPENAI_API_KEY", "")
 
@@ -652,7 +676,7 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
                 st.dataframe(master_df.head(10), use_container_width=True)
 
                 if st.button("🚀 Run AI Trend Analysis", type="primary", use_container_width=True):
-                    with st.spinner("Analyzing cross-variable trends across your logs..."):
+                    with st.spinner("Analyzing cross-variable trends across your full dataset..."):
                         try:
                             client = OpenAI(api_key=openai_key)
                             csv_context = master_df.to_csv(index=False)
@@ -662,17 +686,17 @@ You are an expert sports scientist, neuroscientist, and health analyst.
 Below is a consolidated CSV table containing daily health logs:
 - PVT reaction times (ms), lapses (>500ms), false starts
 - Soreness and stress levels (1-10)
-- Nightly sleep hours and sleep quality (0-10)
+- Nightly sleep hours, sleep quality (0-10), and detailed sleep metrics (sleep_details: bed/wake times, heart rate, deep sleep, noise, awake time, etc.)
 - Evening body weight, workout type, calisthenics reps (pushups, pullups, etc.), and cardio/workout notes
 
 DATA TABLE:
 {csv_context}
 
 Provide a crisp, actionable analysis covering:
-1. **Key Cross-Variable Correlations**: (e.g., How sleep duration/quality influences PVT speed, lapses, or morning stress/soreness).
-2. **Workout & Recovery Impacts**: (e.g., How workout volume/type affects next-day PVT or soreness).
-3. **Red Flags & Anomalies**: (e.g., Drop in cognitive speed, high stress, or sudden fatigue patterns).
-4. **3 Data-Backed Actionable Recommendations**: Concise steps to optimize performance based on these specific entries.
+1. **Detailed Sleep & Cognitive Focus**: Analyze how sleep duration, sleep quality, and raw sleep_details (heart rate, bed times, disruptions) impact morning PVT speed, lapses, and readiness.
+2. **Workout & Recovery Impacts**: How workout volume/type affects next-day PVT or soreness.
+3. **Red Flags & Anomalies**: Flag any drops in reaction speed, high stress, or fatigue patterns.
+4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance based on these logs.
 """
                             response = client.chat.completions.create(
                                 model="gpt-4o-mini",
@@ -691,7 +715,7 @@ Provide a crisp, actionable analysis covering:
                             st.error(f"Error running AI Analysis: {e}")
 
 # ==========================================
-# PAGE 6: DATA MANAGER & INLINE EDITOR WITH DELETION
+# PAGE 6: DATA MANAGER
 # ==========================================
 elif st.session_state["active_tab"] == "📁 Data Manager":
     st.header("📁 Historical Data Manager")
@@ -699,7 +723,6 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
 
     tab_m, tab_e, tab_s = st.tabs(["☀️ Morning Logs", "🌙 Evening Logs", "🛌 Sleep Logs"])
 
-    # --- TAB 1: MORNING LOGS ---
     with tab_m:
         df_m = load_data(MORNING_LOG)
         if not df_m.empty:
@@ -712,18 +735,13 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                     try:
                         edited_dates_m = set(edited_df_m["date"].astype(str)) if not edited_df_m.empty else set()
                         deleted_dates_m = list(original_dates_m - edited_dates_m)
-                        
-                        # Delete missing dates from Supabase
                         if deleted_dates_m:
                             supabase.table("morning_logs").delete().in_("date", deleted_dates_m).execute()
-                            
-                        # Upsert remaining/updated records
                         if not edited_df_m.empty:
                             records = edited_df_m.to_dict(orient="records")
                             for r in records:
                                 r["date"] = str(r["date"])
                             supabase.table("morning_logs").upsert(records, on_conflict="date").execute()
-                            
                         st.success("Morning logs updated and deletions applied!")
                         st.rerun()
                     except Exception as e:
@@ -731,7 +749,6 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
         else:
             st.info("No morning logs found.")
 
-    # --- TAB 2: EVENING LOGS ---
     with tab_e:
         df_e = load_data(EVENING_LOG)
         if not df_e.empty:
@@ -744,18 +761,13 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                     try:
                         edited_dates_e = set(edited_df_e["date"].astype(str)) if not edited_df_e.empty else set()
                         deleted_dates_e = list(original_dates_e - edited_dates_e)
-                        
-                        # Delete missing dates from Supabase
                         if deleted_dates_e:
                             supabase.table("evening_logs").delete().in_("date", deleted_dates_e).execute()
-                            
-                        # Upsert remaining/updated records
                         if not edited_df_e.empty:
                             records = edited_df_e.to_dict(orient="records")
                             for r in records:
                                 r["date"] = str(r["date"])
                             supabase.table("evening_logs").upsert(records, on_conflict="date").execute()
-                            
                         st.success("Evening logs updated and deletions applied!")
                         st.rerun()
                     except Exception as e:
@@ -763,7 +775,6 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
         else:
             st.info("No evening logs found.")
 
-    # --- TAB 3: SLEEP LOGS ---
     with tab_s:
         df_s = load_data(SLEEP_LOG)
         if not df_s.empty:
@@ -776,18 +787,13 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                     try:
                         edited_dates_s = set(edited_df_s["date"].astype(str)) if not edited_df_s.empty else set()
                         deleted_dates_s = list(original_dates_s - edited_dates_s)
-                        
-                        # Delete missing dates from Supabase
                         if deleted_dates_s:
                             supabase.table("sleep_logs").delete().in_("date", deleted_dates_s).execute()
-                            
-                        # Upsert remaining/updated records
                         if not edited_df_s.empty:
                             records = edited_df_s.to_dict(orient="records")
                             for r in records:
                                 r["date"] = str(r["date"])
                             supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
-                            
                         st.success("Sleep logs updated and deletions applied!")
                         st.rerun()
                     except Exception as e:
