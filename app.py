@@ -7,12 +7,13 @@ from datetime import datetime, date, timedelta
 import os
 from supabase import create_client, Client
 
-# Optional OpenAI Import
+# Google GenAI SDK Import
 try:
-    from openai import OpenAI
-    HAS_OPENAI = True
+    from google import genai
+    from google.genai import types
+    HAS_GEMINI = True
 except ImportError:
-    HAS_OPENAI = False
+    HAS_GEMINI = False
 
 # --- APP CONFIGURATION ---
 st.set_page_config(page_title="My Personal Health OS", layout="wide", page_icon="🛡️")
@@ -671,17 +672,17 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: AI HEALTH ANALYST (REPORT & INTERACTIVE CHAT)
+# PAGE 5: GEMINI AI HEALTH ANALYST (REPORT & INTERACTIVE CHAT)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
-    st.header("🧠 AI Health & Performance Analyst")
+    st.header("🧠 Google Gemini AI Health & Performance Analyst")
 
-    openai_key = st.secrets.get("OPENAI_API_KEY", "")
+    gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 
-    if not HAS_OPENAI:
-        st.error("The `openai` package is missing. Ensure `openai` is listed in `requirements.txt`.")
-    elif not openai_key:
-        st.warning("⚠️ `OPENAI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets.")
+    if not HAS_GEMINI:
+        st.error("The `google-genai` package is missing. Ensure `google-genai` is listed in `requirements.txt`.")
+    elif not gemini_key:
+        st.warning("⚠️ `GEMINI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets.")
     else:
         df_m = load_data(MORNING_LOG)
         df_e = load_data(EVENING_LOG)
@@ -711,10 +712,10 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
                     st.subheader("📋 Master Log Preview")
                     st.dataframe(master_df.head(10), use_container_width=True)
 
-                    if st.button("🚀 Run AI Trend Analysis", type="primary", use_container_width=True):
-                        with st.spinner("Analyzing cross-variable trends..."):
+                    if st.button("🚀 Run Gemini AI Trend Analysis", type="primary", use_container_width=True):
+                        with st.spinner("Gemini is analyzing cross-variable trends..."):
                             try:
-                                client = OpenAI(api_key=openai_key)
+                                client = genai.Client(api_key=gemini_key)
                                 prompt = f"""
 You are an expert sports scientist, neuroscientist, and health analyst.
 Below is a consolidated CSV table containing daily health logs:
@@ -732,47 +733,44 @@ Provide a crisp, actionable analysis covering:
 3. **Red Flags & Anomalies**: Flag drops in reaction speed, high stress, or fatigue.
 4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance.
 """
-                                response = client.chat.completions.create(
-                                    model="gpt-4o-mini",
-                                    messages=[
-                                        {"role": "system", "content": "You are a precise, data-driven personal health AI assistant."},
-                                        {"role": "user", "content": prompt}
-                                    ],
-                                    temperature=0.3
+                                response = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=prompt,
+                                    config=types.GenerateContentConfig(
+                                        system_instruction="You are a precise, data-driven personal health AI assistant.",
+                                        temperature=0.3,
+                                    )
                                 )
 
                                 st.markdown("---")
                                 st.markdown("### 📊 AI Health Insights")
-                                st.markdown(response.choices[0].message.content)
+                                st.markdown(response.text)
 
                             except Exception as e:
-                                st.error(f"Error running AI Analysis: {e}")
+                                st.error(f"Error running Gemini AI Analysis: {e}")
 
                 # --- SUB-TAB 2: INTERACTIVE CUSTOM Q&A CHAT ---
                 with ai_tab2:
-                    st.subheader("💬 Ask Your Health AI Anything")
+                    st.subheader("💬 Ask Your Health Gemini AI Anything")
                     st.caption("Ask open-ended questions about your reaction times, sleep quality, workouts, or recovery trends.")
 
-                    # Clear Chat Button
                     if st.button("🗑️ Clear Chat History"):
                         st.session_state["chat_messages"] = []
                         st.rerun()
 
-                    # Display existing conversation
                     for msg in st.session_state["chat_messages"]:
                         with st.chat_message(msg["role"]):
                             st.markdown(msg["content"])
 
-                    # Accept User Input
                     if user_query := st.chat_input("e.g., What was my average reaction time on days I slept less than 7 hours?"):
                         st.session_state["chat_messages"].append({"role": "user", "content": user_query})
                         with st.chat_message("user"):
                             st.markdown(user_query)
 
                         with st.chat_message("assistant"):
-                            with st.spinner("Analyzing your logs..."):
+                            with st.spinner("Gemini is searching your logs..."):
                                 try:
-                                    client = OpenAI(api_key=openai_key)
+                                    client = genai.Client(api_key=gemini_key)
                                     
                                     system_prompt = f"""
 You are an expert personal health and performance AI.
@@ -784,22 +782,32 @@ MASTER DATA TABLE:
 Answer the user's specific questions using exact numbers and trends from this dataset wherever possible.
 Be direct, helpful, and concise.
 """
-                                    api_messages = [{"role": "system", "content": system_prompt}]
+                                    history_str = ""
                                     for m in st.session_state["chat_messages"]:
-                                        api_messages.append({"role": m["role"], "content": m["content"]})
+                                        speaker = "User" if m["role"] == "user" else "AI Assistant"
+                                        history_str += f"{speaker}: {m['content']}\n\n"
 
-                                    chat_response = client.chat.completions.create(
-                                        model="gpt-4o-mini",
-                                        messages=api_messages,
-                                        temperature=0.3
+                                    full_query = f"""
+Conversation History:
+{history_str}
+
+Respond to the latest query while referencing dataset numbers/trends where relevant.
+"""
+                                    chat_response = client.models.generate_content(
+                                        model="gemini-2.5-flash",
+                                        contents=full_query,
+                                        config=types.GenerateContentConfig(
+                                            system_instruction=system_prompt,
+                                            temperature=0.3,
+                                        )
                                     )
 
-                                    ai_reply = chat_response.choices[0].message.content
+                                    ai_reply = chat_response.text
                                     st.markdown(ai_reply)
                                     st.session_state["chat_messages"].append({"role": "assistant", "content": ai_reply})
 
                                 except Exception as e:
-                                    st.error(f"Error communicating with AI: {e}")
+                                    st.error(f"Error communicating with Gemini: {e}")
 
 # ==========================================
 # PAGE 6: DATA MANAGER
