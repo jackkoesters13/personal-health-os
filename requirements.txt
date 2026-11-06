@@ -3,4 +3,4 @@ pandas
 plotly
 supabase
 statsmodels
-openai
+google-genai
