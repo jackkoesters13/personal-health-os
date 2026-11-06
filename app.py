@@ -10,7 +10,24 @@ from supabase import create_client, Client
 # --- SUPABASE DATABASE INITIALIZATION ---
 @st.cache_resource
 def init_supabase() -> Client:
-    def load_data(file_path):
+    url = st.secrets.get("SUPABASE_URL", "")
+    key = st.secrets.get("SUPABASE_KEY", "")
+    if not url or not key:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
+supabase = init_supabase()
+
+# --- FILE PATH SETUP ---
+MORNING_LOG = "morning_logs.csv"
+EVENING_LOG = "evening_logs.csv"
+SLEEP_LOG = "sleep_logs.csv"
+
+# --- HELPER FUNCTIONS ---
+def load_data(file_path):
     table_name = file_path.replace(".csv", "")
     # Try loading from Supabase Cloud first
     if supabase:
@@ -25,30 +42,6 @@ def init_supabase() -> Client:
             pass
             
     # Fallback to local CSV if offline/local
-    if os.path.exists(file_path):
-        try:
-            df = pd.read_csv(file_path)
-            if "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"]).dt.date
-            return df
-        except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
-    url = st.secrets.get("SUPABASE_URL", "")
-    key = st.secrets.get("SUPABASE_KEY", "")
-    if not url or not key:
-        return None
-    return create_client(url, key)
-
-supabase = init_supabase()
-
-# --- FILE PATH SETUP ---
-MORNING_LOG = "morning_logs.csv"
-EVENING_LOG = "evening_logs.csv"
-SLEEP_LOG = "sleep_logs.csv"
-
-# --- HELPER FUNCTIONS ---
-def load_data(file_path):
     if os.path.exists(file_path):
         try:
             df = pd.read_csv(file_path)
@@ -266,6 +259,15 @@ if st.session_state["active_tab"] == "☀️ Morning":
                     df_m = df_m[df_m["date"] != log_date]
                 df_m = pd.concat([df_m, pd.DataFrame([new_entry])], ignore_index=True)
                 save_data(df_m, MORNING_LOG)
+
+                # --- SYNC TO SUPABASE CLOUD ---
+                if supabase:
+                    try:
+                        entry_db = new_entry.copy()
+                        entry_db["date"] = str(entry_db["date"])
+                        supabase.table("morning_logs").upsert(entry_db, on_conflict="date").execute()
+                    except Exception as e:
+                        st.warning(f"Cloud sync note: {e}")
                 
                 st.session_state["edit_morning"] = False
                 st.success("Morning log saved successfully!")
@@ -382,6 +384,14 @@ elif st.session_state["active_tab"] == "🌙 Evening":
                 df_e = df_e[df_e["date"] != log_date]
             df_e = pd.concat([df_e, pd.DataFrame([new_entry])], ignore_index=True)
             save_data(df_e, EVENING_LOG)
+            # --- SYNC TO SUPABASE CLOUD ---
+            if supabase:
+                try:
+                    entry_db = new_entry.copy()
+                    entry_db["date"] = str(entry_db["date"])
+                    supabase.table("evening_logs").upsert(entry_db, on_conflict="date").execute()
+                except Exception as e:
+                    st.warning(f"Cloud sync note: {e}")
 
             st.session_state["edit_evening"] = False
             st.session_state["num_workouts"] = 1  # Reset to 1 workout slot after successful save
@@ -445,6 +455,15 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                         combined = df_to_save
                         
                     save_data(combined, SLEEP_LOG)
+                    # --- SYNC TO SUPABASE CLOUD ---
+                    if supabase:
+                        try:
+                            records = combined.to_dict(orient="records")
+                            for r in records:
+                                r["date"] = str(r["date"])
+                            supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
+                        except Exception as e:
+                            st.warning(f"Cloud sync note: {e}")
                     st.success(f"Successfully saved {len(df_to_save)} sleep records!")
 
             else:
@@ -456,125 +475,3 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
 # ==========================================
 # PAGE 4: DASHBOARD ANALYTICS
 # ==========================================
-elif st.session_state["active_tab"] == "📊 Dashboard":
-    st.header("📊 Health & Performance Analytics")
-    
-    df_m = load_data(MORNING_LOG)
-    df_e = load_data(EVENING_LOG)
-    df_s = load_data(SLEEP_LOG)
-
-    if df_m.empty and df_e.empty and df_s.empty:
-        st.info("No data logged yet. Start entering daily logs or import sleep data to generate charts.")
-    else:
-        # Pre-process dates
-        if not df_m.empty: df_m["date"] = pd.to_datetime(df_m["date"])
-        if not df_e.empty: df_e["date"] = pd.to_datetime(df_e["date"])
-        if not df_s.empty: df_s["date"] = pd.to_datetime(df_s["date"])
-
-        # 1. PVT COGNITIVE TRENDS
-        if not df_m.empty and "pvt_reaction_time" in df_m.columns:
-            st.subheader("⚡ Cognitive Focus: PVT Reaction Time")
-            df_m = df_m.sort_values("date").reset_index(drop=True)
-            df_m["7d_avg"] = df_m["pvt_reaction_time"].rolling(window=7, min_periods=1).mean()
-            df_m["30d_avg"] = df_m["pvt_reaction_time"].rolling(window=30, min_periods=1).mean()
-
-            fig_pvt = go.Figure()
-            fig_pvt.add_trace(go.Scatter(x=df_m["date"], y=df_m["pvt_reaction_time"], mode="markers+lines", name="Daily Raw (ms)", line=dict(color="#4da6ff")))
-            fig_pvt.add_trace(go.Scatter(x=df_m["date"], y=df_m["7d_avg"], mode="lines", name="7-Day Avg", line=dict(color="#ff9900", width=2)))
-            fig_pvt.add_trace(go.Scatter(x=df_m["date"], y=df_m["30d_avg"], mode="lines", name="30-Day Avg", line=dict(color="#ff3333", width=2, dash="dash")))
-
-            fig_pvt.update_layout(
-                title="Reaction Time (Lower is Better)",
-                xaxis_title="Date",
-                yaxis_title="ms",
-                hovermode="x unified",
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_pvt, use_container_width=True)
-
-        # 2. SLEEP TRENDS & QUALITY
-        if not df_s.empty and "sleep_hours" in df_s.columns:
-            st.subheader("🛌 Sleep Duration & Quality")
-            df_s = df_s.sort_values("date").reset_index(drop=True)
-            
-            fig_sleep = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_sleep.add_trace(
-                go.Bar(x=df_s["date"], y=df_s["sleep_hours"], name="Sleep Hours", marker_color="#8b5cf6", opacity=0.7),
-                secondary_y=False,
-            )
-            if "sleep_quality" in df_s.columns:
-                fig_sleep.add_trace(
-                    go.Scatter(x=df_s["date"], y=df_s["sleep_quality"], name="Sleep Quality (0-10)", mode="lines+markers", line=dict(color="#2dd4bf", width=3)),
-                    secondary_y=True,
-                )
-                
-            fig_sleep.update_layout(
-                title="Nightly Sleep Trends",
-                hovermode="x unified",
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            fig_sleep.update_yaxes(title_text="Hours", secondary_y=False)
-            if "sleep_quality" in df_s.columns:
-                fig_sleep.update_yaxes(title_text="Quality Score", range=[0, 10], secondary_y=True)
-                
-            st.plotly_chart(fig_sleep, use_container_width=True)
-
-        # 3. SLEEP VS. PVT CORRELATION
-        if not df_m.empty and not df_s.empty and "pvt_reaction_time" in df_m.columns:
-            merged_sleep_pvt = pd.merge(df_m, df_s, on="date", how="inner")
-            if not merged_sleep_pvt.empty:
-                st.subheader("🧠 Sleep Duration vs. Cognitive Focus (PVT)")
-                fig_corr = px.scatter(
-                    merged_sleep_pvt, 
-                    x="sleep_hours", 
-                    y="pvt_reaction_time", 
-                    trendline="ols",
-                    title="How Sleep Hours Affect Reaction Time",
-                    labels={"sleep_hours": "Sleep Hours", "pvt_reaction_time": "Reaction Time (ms)"}
-                )
-                fig_corr.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig_corr, use_container_width=True)
-
-        # 4. CALISTHENICS REPETITION VOLUME
-        if not df_e.empty and any(c in df_e.columns for c in ["pushups", "pullups", "chinups", "curlups", "situps"]):
-            st.subheader("💪 Calisthenics Volume")
-            df_e = df_e.sort_values("date").reset_index(drop=True)
-            fig_cal = go.Figure()
-            if "pushups" in df_e.columns: fig_cal.add_trace(go.Bar(x=df_e["date"], y=df_e["pushups"], name="Push-ups"))
-            if "pullups" in df_e.columns: fig_cal.add_trace(go.Bar(x=df_e["date"], y=df_e["pullups"], name="Pull-ups"))
-            if "curlups" in df_e.columns: fig_cal.add_trace(go.Bar(x=df_e["date"], y=df_e["curlups"], name="Curl-ups"))
-            if "situps" in df_e.columns: fig_cal.add_trace(go.Bar(x=df_e["date"], y=df_e["situps"], name="Sit-ups"))
-
-            fig_cal.update_layout(
-                barmode="stack",
-                title="Daily Calisthenic Reps",
-                xaxis_title="Date",
-                yaxis_title="Reps",
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_cal, use_container_width=True)
-
-        # 5. WEIGHT TRACKING (FROM EVENING LOG)
-        if not df_e.empty and "weight" in df_e.columns:
-            st.subheader("⚖️ Weight Progression")
-            fig_weight = px.line(df_e, x="date", y="weight", markers=True, title="Body Weight (lbs)")
-            fig_weight.update_layout(margin=dict(l=20, r=20, t=40, b=20))
-            st.plotly_chart(fig_weight, use_container_width=True)
-
-        # 6. RECOVERY VS. STRESS CORRELATION
-        if not df_m.empty and "soreness" in df_m.columns and "stress_level" in df_m.columns:
-            st.subheader("🧘 Stress vs. Soreness Tracker")
-            fig_rec = go.Figure()
-            fig_rec.add_trace(go.Scatter(x=df_m["date"], y=df_m["soreness"], name="Morning Soreness", line=dict(color="#a855f7")))
-            fig_rec.add_trace(go.Scatter(x=df_m["date"], y=df_m["stress_level"], name="Morning Stress", line=dict(color="#f97316")))
-             fig_rec.update_layout(
-                title="Soreness vs. Stress Levels",
-                xaxis_title="Date",
-                yaxis_title="Scale (1-10)",
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_rec, use_container_width=True)
