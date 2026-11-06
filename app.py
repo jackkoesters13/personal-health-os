@@ -100,12 +100,12 @@ def check_entry_exists(file_path, check_date):
     return False
 
 def call_gemini_with_fallback(client, contents, system_instruction):
-    """Retries with backoff and falls back across models on 503 high demand."""
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro"]
+    """Tries active Gemini models and handles 404/NOT_FOUND and 503/UNAVAILABLE gracefully."""
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
     last_exception = None
 
     for model_name in models_to_try:
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -119,11 +119,15 @@ def call_gemini_with_fallback(client, contents, system_instruction):
             except Exception as e:
                 last_exception = e
                 err_str = str(e)
-                if "503" in err_str or "UNAVAILABLE" in err_str or "high demand" in err_str:
+                # Catch 404 / NOT_FOUND or deprecation errors and jump to next model
+                if "404" in err_str or "NOT_FOUND" in err_str or "no longer available" in err_str:
+                    break
+                # Catch 503 / UNAVAILABLE spikes and retry with exponential wait
+                elif "503" in err_str or "UNAVAILABLE" in err_str or "high demand" in err_str:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 else:
-                    raise e
+                    break
     raise last_exception
 
 # --- INITIALIZE SESSION STATE ---
@@ -700,7 +704,7 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: GEMINI AI HEALTH ANALYST (AUTO-RETRY & FALLBACK)
+# PAGE 5: GEMINI AI HEALTH ANALYST (SMART MODEL ROUTER)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
     st.header("🧠 Google Gemini AI Health & Performance Analyst")
