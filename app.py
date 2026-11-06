@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import os
+import time
 from supabase import create_client, Client
 
 # Google GenAI SDK Import
@@ -97,6 +98,33 @@ def check_entry_exists(file_path, check_date):
     if not df.empty and "date" in df.columns:
         return check_date in df["date"].values
     return False
+
+def call_gemini_with_fallback(client, contents, system_instruction):
+    """Retries with backoff and falls back across models on 503 high demand."""
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro"]
+    last_exception = None
+
+    for model_name in models_to_try:
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.3,
+                    )
+                )
+                return response
+            except Exception as e:
+                last_exception = e
+                err_str = str(e)
+                if "503" in err_str or "UNAVAILABLE" in err_str or "high demand" in err_str:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                else:
+                    raise e
+    raise last_exception
 
 # --- INITIALIZE SESSION STATE ---
 if "edit_morning" not in st.session_state:
@@ -672,7 +700,7 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: GEMINI AI HEALTH ANALYST (REPORT & INTERACTIVE CHAT)
+# PAGE 5: GEMINI AI HEALTH ANALYST (AUTO-RETRY & FALLBACK)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
     st.header("🧠 Google Gemini AI Health & Performance Analyst")
@@ -691,7 +719,6 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
         if df_m.empty and df_e.empty and df_s.empty:
             st.info("No data logged yet. Add morning, evening, or sleep records to run AI trend analysis.")
         else:
-            # Build Master Merged DataFrame
             master_df = None
             for df in [df_m, df_e, df_s]:
                 if not df.empty and "date" in df.columns:
@@ -733,13 +760,10 @@ Provide a crisp, actionable analysis covering:
 3. **Red Flags & Anomalies**: Flag drops in reaction speed, high stress, or fatigue.
 4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance.
 """
-                                response = client.models.generate_content(
-                                    model="gemini-3.8-flash",
+                                response = call_gemini_with_fallback(
+                                    client=client,
                                     contents=prompt,
-                                    config=types.GenerateContentConfig(
-                                        system_instruction="You are a precise, data-driven personal health AI assistant.",
-                                        temperature=0.3,
-                                    )
+                                    system_instruction="You are a precise, data-driven personal health AI assistant."
                                 )
 
                                 st.markdown("---")
@@ -793,13 +817,10 @@ Conversation History:
 
 Respond to the latest query while referencing dataset numbers/trends where relevant.
 """
-                                    chat_response = client.models.generate_content(
-                                        model="gemini-3.8-flash",
+                                    chat_response = call_gemini_with_fallback(
+                                        client=client,
                                         contents=full_query,
-                                        config=types.GenerateContentConfig(
-                                            system_instruction=system_prompt,
-                                            temperature=0.3,
-                                        )
+                                        system_instruction=system_prompt
                                     )
 
                                     ai_reply = chat_response.text
