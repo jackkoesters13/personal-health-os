@@ -7,12 +7,40 @@ from datetime import datetime, date, timedelta
 import os
 from supabase import create_client, Client
 
-# Optional Google GenAI Import
+# Optional OpenAI Import
 try:
-    from google import genai
-    HAS_GEMINI = True
+    from openai import OpenAI
+    HAS_OPENAI = True
 except ImportError:
-    HAS_GEMINI = False
+    HAS_OPENAI = False
+
+# --- APP CONFIGURATION ---
+st.set_page_config(page_title="My Personal Health OS", layout="wide", page_icon="🛡️")
+
+# --- FEATURE 1: SECURITY PIN GATE ---
+APP_PIN = str(st.secrets.get("APP_PIN", "1234"))
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.title("🛡️ My Personal Health OS")
+    st.subheader("🔒 Security Authentication")
+    st.caption("Please enter your PIN to access your Health OS data.")
+    
+    with st.form("login_form"):
+        entered_pin = st.text_input("Security PIN", type="password", placeholder="Enter PIN")
+        submit_pin = st.form_submit_button("🔓 Unlock Health OS", use_container_width=True, type="primary")
+        
+        if submit_pin:
+            if entered_pin == APP_PIN:
+                st.session_state["authenticated"] = True
+                st.success("Access Granted!")
+                st.rerun()
+            else:
+                st.error("❌ Incorrect PIN. Please try again.")
+    st.info("💡 Tip: You can set a custom PIN in Streamlit Secrets (`APP_PIN = \"1234\"`).")
+    st.stop()
 
 # --- SUPABASE DATABASE INITIALIZATION ---
 @st.cache_resource
@@ -69,9 +97,6 @@ def check_entry_exists(file_path, check_date):
         return check_date in df["date"].values
     return False
 
-# --- APP CONFIGURATION ---
-st.set_page_config(page_title="My Personal Health OS", layout="wide", page_icon="🛡️")
-
 # --- INITIALIZE SESSION STATE ---
 if "edit_morning" not in st.session_state:
     st.session_state["edit_morning"] = False
@@ -81,8 +106,17 @@ if "active_tab" not in st.session_state:
     st.session_state["active_tab"] = "☀️ Morning"
 if "num_workouts" not in st.session_state:
     st.session_state["num_workouts"] = 1
+if "chat_messages" not in st.session_state:
+    st.session_state["chat_messages"] = []
 
-st.title("🛡️ My Personal Health OS")
+# --- APP HEADER & LOCK BUTTON ---
+header_col1, header_col2 = st.columns([5, 1])
+with header_col1:
+    st.title("🛡️ My Personal Health OS")
+with header_col2:
+    if st.button("🔒 Lock OS", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
 # ==========================================
 # MOBILE STACKED NAVIGATION BOXES
@@ -497,7 +531,7 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                     st.success(f"Successfully saved {len(df_to_save)} detailed sleep records!")
 
             else:
-                st.warning("CSV uploaded, but could not detect a valid 'End' or 'date' timestamp column.")
+                st.warning("CSV uploaded, but could not detect a valid timestamp column.")
 
         except Exception as e:
             st.error(f"Error reading file: {e}")
@@ -637,18 +671,17 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: AI HEALTH ANALYST (GOOGLE GEMINI API)
+# PAGE 5: AI HEALTH ANALYST (REPORT & INTERACTIVE CHAT)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
-    st.header("🧠 AI Health & Performance Trend Analyst")
-    st.write("Scan your accumulated health logs for cross-variable trends, cognitive impact patterns, detailed sleep metrics, and recovery correlations.")
+    st.header("🧠 AI Health & Performance Analyst")
 
-    gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+    openai_key = st.secrets.get("OPENAI_API_KEY", "")
 
-    if not HAS_GEMINI:
-        st.error("The `google-genai` package is missing. Ensure `google-genai` is listed in `requirements.txt`.")
-    elif not gemini_key:
-        st.warning("⚠️ `GEMINI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets to enable the AI Analyst.")
+    if not HAS_OPENAI:
+        st.error("The `openai` package is missing. Ensure `openai` is listed in `requirements.txt`.")
+    elif not openai_key:
+        st.warning("⚠️ `OPENAI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets.")
     else:
         df_m = load_data(MORNING_LOG)
         df_e = load_data(EVENING_LOG)
@@ -657,6 +690,7 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
         if df_m.empty and df_e.empty and df_s.empty:
             st.info("No data logged yet. Add morning, evening, or sleep records to run AI trend analysis.")
         else:
+            # Build Master Merged DataFrame
             master_df = None
             for df in [df_m, df_e, df_s]:
                 if not df.empty and "date" in df.columns:
@@ -668,43 +702,104 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
 
             if master_df is not None and not master_df.empty:
                 master_df = master_df.sort_values("date", ascending=False).reset_index(drop=True)
-                st.subheader("📋 Consolidated Master Log Context")
-                st.dataframe(master_df.head(10), use_container_width=True)
+                csv_context = master_df.to_csv(index=False)
 
-                if st.button("🚀 Run AI Trend Analysis", type="primary", use_container_width=True):
-                    with st.spinner("Analyzing cross-variable trends with Google Gemini..."):
-                        try:
-                            client = genai.Client(api_key=gemini_key)
-                            csv_context = master_df.to_csv(index=False)
+                ai_tab1, ai_tab2 = st.tabs(["📊 Automated Report", "💬 Custom AI Chat"])
 
-                            prompt = f"""
+                # --- SUB-TAB 1: AUTOMATED REPORT ---
+                with ai_tab1:
+                    st.subheader("📋 Master Log Preview")
+                    st.dataframe(master_df.head(10), use_container_width=True)
+
+                    if st.button("🚀 Run AI Trend Analysis", type="primary", use_container_width=True):
+                        with st.spinner("Analyzing cross-variable trends..."):
+                            try:
+                                client = OpenAI(api_key=openai_key)
+                                prompt = f"""
 You are an expert sports scientist, neuroscientist, and health analyst.
 Below is a consolidated CSV table containing daily health logs:
 - PVT reaction times (ms), lapses (>500ms), false starts
 - Soreness and stress levels (1-10)
-- Nightly sleep hours, sleep quality (0-10), and detailed sleep metrics (sleep_details: bed/wake times, heart rate, deep sleep, noise, awake time, etc.)
-- Evening body weight, workout type, calisthenics reps (pushups, pullups, etc.), and cardio/workout notes
+- Nightly sleep hours, sleep quality (0-10), and detailed sleep metrics (sleep_details)
+- Evening body weight, workout type, calisthenics reps, cardio, and notes
 
 DATA TABLE:
 {csv_context}
 
 Provide a crisp, actionable analysis covering:
-1. **Detailed Sleep & Cognitive Focus**: Analyze how sleep duration, sleep quality, and raw sleep_details (heart rate, bed times, disruptions) impact morning PVT speed, lapses, and readiness.
+1. **Detailed Sleep & Cognitive Focus**: Analyze how sleep duration, sleep quality, and raw sleep_details impact morning PVT speed and readiness.
 2. **Workout & Recovery Impacts**: How workout volume/type affects next-day PVT or soreness.
-3. **Red Flags & Anomalies**: Flag any drops in reaction speed, high stress, or fatigue patterns.
-4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance based on these logs.
+3. **Red Flags & Anomalies**: Flag drops in reaction speed, high stress, or fatigue.
+4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance.
 """
-                            response = client.models.generate_content(
-                                model="gemini-3.8-flash",
-                                contents=prompt,
-                            )
+                                response = client.chat.completions.create(
+                                    model="gpt-4o-mini",
+                                    messages=[
+                                        {"role": "system", "content": "You are a precise, data-driven personal health AI assistant."},
+                                        {"role": "user", "content": prompt}
+                                    ],
+                                    temperature=0.3
+                                )
 
-                            st.markdown("---")
-                            st.markdown("### 📊 AI Health Insights")
-                            st.markdown(response.text)
+                                st.markdown("---")
+                                st.markdown("### 📊 AI Health Insights")
+                                st.markdown(response.choices[0].message.content)
 
-                        except Exception as e:
-                            st.error(f"Error running AI Analysis: {e}")
+                            except Exception as e:
+                                st.error(f"Error running AI Analysis: {e}")
+
+                # --- SUB-TAB 2: INTERACTIVE CUSTOM Q&A CHAT ---
+                with ai_tab2:
+                    st.subheader("💬 Ask Your Health AI Anything")
+                    st.caption("Ask open-ended questions about your reaction times, sleep quality, workouts, or recovery trends.")
+
+                    # Clear Chat Button
+                    if st.button("🗑️ Clear Chat History"):
+                        st.session_state["chat_messages"] = []
+                        st.rerun()
+
+                    # Display existing conversation
+                    for msg in st.session_state["chat_messages"]:
+                        with st.chat_message(msg["role"]):
+                            st.markdown(msg["content"])
+
+                    # Accept User Input
+                    if user_query := st.chat_input("e.g., What was my average reaction time on days I slept less than 7 hours?"):
+                        st.session_state["chat_messages"].append({"role": "user", "content": user_query})
+                        with st.chat_message("user"):
+                            st.markdown(user_query)
+
+                        with st.chat_message("assistant"):
+                            with st.spinner("Analyzing your logs..."):
+                                try:
+                                    client = OpenAI(api_key=openai_key)
+                                    
+                                    system_prompt = f"""
+You are an expert personal health and performance AI.
+You have complete access to the user's historical health log dataset in CSV format below:
+
+MASTER DATA TABLE:
+{csv_context}
+
+Answer the user's specific questions using exact numbers and trends from this dataset wherever possible.
+Be direct, helpful, and concise.
+"""
+                                    api_messages = [{"role": "system", "content": system_prompt}]
+                                    for m in st.session_state["chat_messages"]:
+                                        api_messages.append({"role": m["role"], "content": m["content"]})
+
+                                    chat_response = client.chat.completions.create(
+                                        model="gpt-4o-mini",
+                                        messages=api_messages,
+                                        temperature=0.3
+                                    )
+
+                                    ai_reply = chat_response.choices[0].message.content
+                                    st.markdown(ai_reply)
+                                    st.session_state["chat_messages"].append({"role": "assistant", "content": ai_reply})
+
+                                except Exception as e:
+                                    st.error(f"Error communicating with AI: {e}")
 
 # ==========================================
 # PAGE 6: DATA MANAGER
