@@ -7,12 +7,12 @@ from datetime import datetime, date, timedelta
 import os
 from supabase import create_client, Client
 
-# Optional OpenAI Import
+# Optional Google GenAI Import
 try:
-    from openai import OpenAI
-    HAS_OPENAI = True
+    from google import genai
+    HAS_GEMINI = True
 except ImportError:
-    HAS_OPENAI = False
+    HAS_GEMINI = False
 
 # --- SUPABASE DATABASE INITIALIZATION ---
 @st.cache_resource
@@ -412,7 +412,7 @@ elif st.session_state["active_tab"] == "🌙 Evening":
             st.rerun()
 
 # ==========================================
-# PAGE 3: SLEEP FILE PARSER & SAVER (FULL DATA CAPTURE)
+# PAGE 3: SLEEP FILE PARSER
 # ==========================================
 elif st.session_state["active_tab"] == "📥 Sleep Import":
     st.header("📥 Import External Sleep Data")
@@ -426,7 +426,6 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
             st.subheader("Data Preview (All Exported Columns Captured)")
             st.dataframe(sleep_df.head(), use_container_width=True)
 
-            # Detect Date Column
             date_col = None
             if "End" in sleep_df.columns:
                 sleep_df["End"] = pd.to_datetime(sleep_df["End"])
@@ -437,7 +436,6 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                 date_col = "date"
 
             if date_col:
-                # Calculate sleep duration
                 if "Time in bed (seconds)" in sleep_df.columns:
                     sleep_df["sleep_hours"] = (sleep_df["Time in bed (seconds)"] / 3600).round(2)
                 elif "Start" in sleep_df.columns and "End" in sleep_df.columns:
@@ -446,7 +444,6 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                 elif "sleep_hours" not in sleep_df.columns:
                     sleep_df["sleep_hours"] = 0.0
 
-                # Calculate sleep quality
                 if "Sleep quality" in sleep_df.columns:
                     sleep_df["sleep_quality"] = (
                         sleep_df["Sleep quality"].astype(str).str.rstrip("%").astype(float) / 10
@@ -454,7 +451,6 @@ elif st.session_state["active_tab"] == "📥 Sleep Import":
                 elif "sleep_quality" not in sleep_df.columns:
                     sleep_df["sleep_quality"] = 0.0
 
-                # Summarize ALL remaining raw CSV columns into a readable sleep_details string
                 exclude_cols = ["date", "sleep_hours", "sleep_quality"]
                 extra_cols = [c for c in sleep_df.columns if c not in exclude_cols]
                 
@@ -641,18 +637,18 @@ elif st.session_state["active_tab"] == "📊 Dashboard":
             st.plotly_chart(fig_rec, use_container_width=True)
 
 # ==========================================
-# PAGE 5: AI HEALTH ANALYST (EXAMINES ALL SLEEP METRICS)
+# PAGE 5: AI HEALTH ANALYST (GOOGLE GEMINI API)
 # ==========================================
 elif st.session_state["active_tab"] == "🧠 AI Analyst":
     st.header("🧠 AI Health & Performance Trend Analyst")
     st.write("Scan your accumulated health logs for cross-variable trends, cognitive impact patterns, detailed sleep metrics, and recovery correlations.")
 
-    openai_key = st.secrets.get("OPENAI_API_KEY", "")
+    gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 
-    if not HAS_OPENAI:
-        st.error("The `openai` package is missing. Ensure `openai` is listed in `requirements.txt`.")
-    elif not openai_key:
-        st.warning("⚠️ `OPENAI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets to enable the AI Analyst.")
+    if not HAS_GEMINI:
+        st.error("The `google-genai` package is missing. Ensure `google-genai` is listed in `requirements.txt`.")
+    elif not gemini_key:
+        st.warning("⚠️ `GEMINI_API_KEY` was not found in Streamlit secrets. Add it under Settings ➔ Secrets to enable the AI Analyst.")
     else:
         df_m = load_data(MORNING_LOG)
         df_e = load_data(EVENING_LOG)
@@ -676,9 +672,9 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
                 st.dataframe(master_df.head(10), use_container_width=True)
 
                 if st.button("🚀 Run AI Trend Analysis", type="primary", use_container_width=True):
-                    with st.spinner("Analyzing cross-variable trends across your full dataset..."):
+                    with st.spinner("Analyzing cross-variable trends with Google Gemini..."):
                         try:
-                            client = OpenAI(api_key=openai_key)
+                            client = genai.Client(api_key=gemini_key)
                             csv_context = master_df.to_csv(index=False)
 
                             prompt = f"""
@@ -698,18 +694,14 @@ Provide a crisp, actionable analysis covering:
 3. **Red Flags & Anomalies**: Flag any drops in reaction speed, high stress, or fatigue patterns.
 4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance based on these logs.
 """
-                            response = client.chat.completions.create(
-                                model="gpt-4o-mini",
-                                messages=[
-                                    {"role": "system", "content": "You are a precise, data-driven personal health AI assistant."},
-                                    {"role": "user", "content": prompt}
-                                ],
-                                temperature=0.3
+                            response = client.models.generate_content(
+                                model="gemini-2.5-flash",
+                                contents=prompt,
                             )
 
                             st.markdown("---")
                             st.markdown("### 📊 AI Health Insights")
-                            st.markdown(response.choices[0].message.content)
+                            st.markdown(response.text)
 
                         except Exception as e:
                             st.error(f"Error running AI Analysis: {e}")
