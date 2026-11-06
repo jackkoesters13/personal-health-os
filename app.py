@@ -794,7 +794,7 @@ Conversation History:
 Respond to the latest query while referencing dataset numbers/trends where relevant.
 """
                                     chat_response = client.models.generate_content(
-                                        model="gemini-2.5-flash",
+                                        model="gemini-3.8-flash",
                                         contents=full_query,
                                         config=types.GenerateContentConfig(
                                             system_instruction=system_prompt,
