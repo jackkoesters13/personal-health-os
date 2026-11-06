@@ -681,3 +681,60 @@ Provide a crisp, actionable analysis covering:
 
                         except Exception as e:
                             st.error(f"Error running AI Analysis: {e}")
+                            
+# ==========================================
+# PAGE 6: DATA MANAGER & INLINE EDITOR
+# ==========================================
+elif st.session_state["active_tab"] == "📁 Data Manager":
+    st.header("📁 Historical Data Manager")
+    st.caption("Double-click any cell to edit past data directly, then tap Save Changes.")
+
+    tab_m, tab_e, tab_s = st.tabs(["☀️ Morning Logs", "🌙 Evening Logs", "🛌 Sleep Logs"])
+
+    with tab_m:
+        df_m = load_data(MORNING_LOG)
+        if not df_m.empty:
+            edited_df_m = st.data_editor(df_m, num_rows="dynamic", use_container_width=True, key="edit_m")
+            if st.button("💾 Save Morning Changes", type="primary"):
+                save_data(edited_df_m, MORNING_LOG)
+                if supabase:
+                    try:
+                        records = edited_df_m.to_dict(orient="records")
+                        for r in records:
+                            r["date"] = str(r["date"])
+                        supabase.table("morning_logs").upsert(records, on_conflict="date").execute()
+                        st.success("Morning logs updated successfully!")
+                    except Exception as e:
+                        st.error(f"Sync error: {e}")
+
+    with tab_e:
+        df_e = load_data(EVENING_LOG)
+        if not df_e.empty:
+            edited_df_e = st.data_editor(df_e, num_rows="dynamic", use_container_width=True, key="edit_e")
+            if st.button("💾 Save Evening Changes", type="primary"):
+                save_data(edited_df_e, EVENING_LOG)
+                if supabase:
+                    try:
+                        records = edited_df_e.to_dict(orient="records")
+                        for r in records:
+                            r["date"] = str(r["date"])
+                        supabase.table("evening_logs").upsert(records, on_conflict="date").execute()
+                        st.success("Evening logs updated successfully!")
+                    except Exception as e:
+                        st.error(f"Sync error: {e}")
+
+    with tab_s:
+        df_s = load_data(SLEEP_LOG)
+        if not df_s.empty:
+            edited_df_s = st.data_editor(df_s, num_rows="dynamic", use_container_width=True, key="edit_s")
+            if st.button("💾 Save Sleep Changes", type="primary"):
+                save_data(edited_df_s, SLEEP_LOG)
+                if supabase:
+                    try:
+                        records = edited_df_s.to_dict(orient="records")
+                        for r in records:
+                            r["date"] = str(r["date"])
+                        supabase.table("sleep_logs").upsert(records, on_conflict="date").execute()
+                        st.success("Sleep logs updated successfully!")
+                    except Exception as e:
+                        st.error(f"Sync error: {e}")
