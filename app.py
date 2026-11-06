@@ -87,33 +87,42 @@ if "num_workouts" not in st.session_state:
 st.title("🛡️ My Personal Health OS")
 
 # ==========================================
-# MOBILE STACKED NAVIGATION BOXES
+# MOBILE STACKED NAVIGATION BOXES (2 ROWS OF 3)
 # ==========================================
 st.markdown("### 📱 Navigation")
 
-nav_col1, nav_col2, nav_col3 = st.columns(3)
+nav_row1_col1, nav_row1_col2, nav_row1_col3 = st.columns(3)
 
-with nav_col1:
+with nav_row1_col1:
     if st.button("☀️ Morning", use_container_width=True, type="primary" if st.session_state["active_tab"] == "☀️ Morning" else "secondary"):
         st.session_state["active_tab"] = "☀️ Morning"
         st.rerun()
 
-    if st.button("📥 Sleep Import", use_container_width=True, type="primary" if st.session_state["active_tab"] == "📥 Sleep Import" else "secondary"):
-        st.session_state["active_tab"] = "📥 Sleep Import"
-        st.rerun()
-
-with nav_col2:
+with nav_row1_col2:
     if st.button("🌙 Evening", use_container_width=True, type="primary" if st.session_state["active_tab"] == "🌙 Evening" else "secondary"):
         st.session_state["active_tab"] = "🌙 Evening"
         st.rerun()
 
+with nav_row1_col3:
+    if st.button("📥 Sleep Import", use_container_width=True, type="primary" if st.session_state["active_tab"] == "📥 Sleep Import" else "secondary"):
+        st.session_state["active_tab"] = "📥 Sleep Import"
+        st.rerun()
+
+nav_row2_col1, nav_row2_col2, nav_row2_col3 = st.columns(3)
+
+with nav_row2_col1:
     if st.button("📊 Dashboard", use_container_width=True, type="primary" if st.session_state["active_tab"] == "📊 Dashboard" else "secondary"):
         st.session_state["active_tab"] = "📊 Dashboard"
         st.rerun()
 
-with nav_col3:
+with nav_row2_col2:
     if st.button("🧠 AI Analyst", use_container_width=True, type="primary" if st.session_state["active_tab"] == "🧠 AI Analyst" else "secondary"):
         st.session_state["active_tab"] = "🧠 AI Analyst"
+        st.rerun()
+
+with nav_row2_col3:
+    if st.button("📁 Data Manager", use_container_width=True, type="primary" if st.session_state["active_tab"] == "📁 Data Manager" else "secondary"):
+        st.session_state["active_tab"] = "📁 Data Manager"
         st.rerun()
 
 st.divider()
@@ -628,7 +637,6 @@ elif st.session_state["active_tab"] == "🧠 AI Analyst":
         if df_m.empty and df_e.empty and df_s.empty:
             st.info("No data logged yet. Add morning, evening, or sleep records to run AI trend analysis.")
         else:
-            # Merge logs on date
             master_df = None
             for df in [df_m, df_e, df_s]:
                 if not df.empty and "date" in df.columns:
@@ -681,7 +689,7 @@ Provide a crisp, actionable analysis covering:
 
                         except Exception as e:
                             st.error(f"Error running AI Analysis: {e}")
-                            
+
 # ==========================================
 # PAGE 6: DATA MANAGER & INLINE EDITOR
 # ==========================================
@@ -706,6 +714,8 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                         st.success("Morning logs updated successfully!")
                     except Exception as e:
                         st.error(f"Sync error: {e}")
+        else:
+            st.info("No morning logs found.")
 
     with tab_e:
         df_e = load_data(EVENING_LOG)
@@ -722,6 +732,8 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                         st.success("Evening logs updated successfully!")
                     except Exception as e:
                         st.error(f"Sync error: {e}")
+        else:
+            st.info("No evening logs found.")
 
     with tab_s:
         df_s = load_data(SLEEP_LOG)
@@ -738,3 +750,5 @@ elif st.session_state["active_tab"] == "📁 Data Manager":
                         st.success("Sleep logs updated successfully!")
                     except Exception as e:
                         st.error(f"Sync error: {e}")
+        else:
+            st.info("No sleep logs found.")
