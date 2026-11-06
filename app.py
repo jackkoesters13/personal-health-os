@@ -734,7 +734,7 @@ Provide a crisp, actionable analysis covering:
 4. **3 Data-Backed Actionable Recommendations**: Specific steps to optimize performance.
 """
                                 response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
+                                    model="gemini-3.8-flash",
                                     contents=prompt,
                                     config=types.GenerateContentConfig(
                                         system_instruction="You are a precise, data-driven personal health AI assistant.",
